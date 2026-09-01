@@ -1,0 +1,382 @@
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --border: #e3e6ea;
+  --text: #1f2329;
+  --text-sub: #6b7280;
+  --accent: #2f6fed;
+  --accent-hover: #245cd4;
+  --danger: #d93026;
+  --warn: #b45309;
+  --ok: #15803d;
+  --high: #d93026;
+  --medium: #d97706;
+  --low: #15803d;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="dark"] {
+  --bg: #15171c;
+  --panel: #1e2128;
+  --border: #2c313b;
+  --text: #e5e7eb;
+  --text-sub: #9aa1ad;
+  --accent: #4c8dff;
+  --accent-hover: #6ba0ff;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-icon {
+  font-size: 28px;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  color: #fff;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  border: none;
+  background: transparent;
+  color: var(--text-sub);
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px 20px 40px;
+}
+
+.status-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-sub);
+}
+
+.chip.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.chip.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-head h2 {
+  margin: 0;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--text-sub);
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.email-card {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.email-card:last-child {
+  border-bottom: none;
+}
+
+.email-card:hover {
+  background: var(--bg);
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prio-icon {
+  font-size: 14px;
+}
+
+.card-title {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-sub);
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.card-summary {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.card-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-sub);
+  font-size: 14px;
+}
+
+.error-box {
+  padding: 12px 16px;
+  margin: 12px 16px;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  border-radius: 8px;
+  font-size: 13px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+/* ---- 报告 / 详情 ---- */
+
+.kv-grid {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.kv-item {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.kv-item .k {
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.kv-item .v {
+  font-size: 14px;
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.report-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.report-section:last-child {
+  border-bottom: none;
+}
+
+.report-section h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.report-summary {
+  font-size: 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.report-stats {
+  display: flex;
+  gap: 16px;
+  padding: 12px 16px;
+  font-size: 13px;
+}
+
+.report-stats b {
+  font-size: 16px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.report-item {
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.report-item:last-child {
+  border-bottom: none;
+}
+
+.report-item .t {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.report-item .d {
+  font-size: 12px;
+  color: var(--text-sub);
+  margin-top: 2px;
+}
+
+.action-item {
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 13px;
+}
+
+.action-item:last-child {
+  border-bottom: none;
+}
+
+.footer {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-sub);
+  padding: 8px 16px 24px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

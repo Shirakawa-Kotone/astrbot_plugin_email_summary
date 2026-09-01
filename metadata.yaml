@@ -1,0 +1,6 @@
+name: email_summary_assistant
+display_name: 企业微信邮箱智能整理
+desc: 企业微信邮箱智能整理插件：定时拉取邮件、每封 LLM 分析、汇总报告推送到 QQ，支持 QQ 指令查询
+author: chen4
+version: 1.0.0
+repo: https://github.com/chen4/astrbot_plugin_email_summary

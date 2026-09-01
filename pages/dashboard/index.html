@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>邮件看板</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-icon">📧</span>
+        <div>
+          <h1 id="page-title">邮件看板</h1>
+          <p class="subtitle" id="page-subtitle">企业微信邮箱智能整理</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="btn-scan" class="btn btn-primary" title="立即拉取并分析新邮件">🔍 触发扫描</button>
+        <button id="btn-report" class="btn" title="基于已分析邮件生成汇总报告">📊 生成汇总</button>
+        <button id="btn-refresh" class="btn" title="刷新列表">🔄 刷新</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="status-bar" class="status-bar"></section>
+
+      <section id="report-view" class="panel hidden">
+        <div class="panel-head">
+          <h2>汇总报告</h2>
+          <button class="btn btn-ghost" data-close="report-view">关闭</button>
+        </div>
+        <div id="report-body"></div>
+      </section>
+
+      <section id="detail-view" class="panel hidden">
+        <div class="panel-head">
+          <h2>邮件详情</h2>
+          <button class="btn btn-ghost" data-close="detail-view">返回列表</button>
+        </div>
+        <div id="detail-body"></div>
+      </section>
+
+      <section id="list-view" class="panel">
+        <div class="panel-head">
+          <h2>邮件分析列表 <span id="list-count" class="badge"></span></h2>
+          <span class="hint">点击邮件查看完整分析</span>
+        </div>
+        <div id="list-body"></div>
+      </section>
+    </main>
+
+    <footer class="footer">数据来源：插件本地分析记录 · 点击「生成汇总」会调用已配置的 LLM</footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,86 @@
+{
+  "email_address": {
+    "description": "你的企业邮箱地址，如 zhangsan@company.com",
+    "type": "string",
+    "default": ""
+  },
+  "email_auth_code": {
+    "description": "企业微信邮箱生成的 IMAP 授权码（非登录密码）",
+    "type": "string",
+    "default": "",
+    "secret": true
+  },
+  "imap_host": {
+    "description": "企业微信邮箱 IMAP 服务器地址",
+    "type": "string",
+    "default": "imap.exmail.qq.com"
+  },
+  "imap_port": {
+    "description": "企业微信邮箱 IMAP 端口（SSL）",
+    "type": "int",
+    "default": 993
+  },
+  "llm_api_key": {
+    "description": "OpenAI 兼容 API 的 Key",
+    "type": "string",
+    "default": "",
+    "secret": true
+  },
+  "llm_api_base": {
+    "description": "OpenAI 兼容 API 的 Base URL",
+    "type": "string",
+    "default": "https://api.openai.com/v1"
+  },
+  "llm_model": {
+    "description": "使用的模型名称",
+    "type": "string",
+    "default": "gpt-4o-mini"
+  },
+  "summary_mode": {
+    "description": "brief=精简, balanced=均衡, detailed=详细, ultra_detailed=超详细",
+    "type": "string",
+    "default": "balanced",
+    "options": ["brief", "balanced", "detailed", "ultra_detailed"]
+  },
+  "schedule_mode": {
+    "description": "interval=间隔模式, fixed=每日定时模式",
+    "type": "string",
+    "default": "interval",
+    "options": ["interval", "fixed"]
+  },
+  "interval_hours": {
+    "description": "间隔模式下每隔多少小时扫描一次",
+    "type": "float",
+    "default": 2
+  },
+  "fixed_time": {
+    "description": "定时模式下每天执行时间，格式 HH:MM",
+    "type": "string",
+    "default": "09:00"
+  },
+  "max_scan_days": {
+    "description": "从最近多少天内扫描邮件",
+    "type": "int",
+    "default": 7
+  },
+  "max_emails": {
+    "description": "每次扫描最多处理多少封邮件",
+    "type": "int",
+    "default": 50
+  },
+  "report_recent_n": {
+    "description": "汇总报告包含最近多少封邮件的分析",
+    "type": "int",
+    "default": 30
+  },
+  "push_enabled": {
+    "description": "每次扫描后是否自动推送汇总报告到目标 QQ",
+    "type": "bool",
+    "default": true
+  },
+  "target_qq": {
+    "description": "汇总报告推送到哪个 QQ 号（留空则使用命令请求者）",
+    "type": "string",
+    "default": ""
+  }
+}
