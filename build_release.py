@@ -51,6 +51,7 @@ INCLUDE_FILES = (
     "_conf_schema.json",
     "README.md",
     "requirements.txt",
+    "LICENSE",
     "core/__init__.py",
     "core/imap_fetcher.py",
     "core/email_analyzer.py",
