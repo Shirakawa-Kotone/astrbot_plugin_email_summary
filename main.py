@@ -10,6 +10,8 @@
    - /邮件列表 → 列出已分析邮件
    - /邮件 <编号> → 查看指定邮件分析详情
    - /扫描 → 立即手动触发一次拉取+逐封分析
+   - /重新总结 → 把未总结/上次失败的邮件重新分析一遍
+   - /重新总结 全部 → 强制把范围内所有邮件重新分析并覆盖旧结果
 """
 
 from __future__ import annotations
@@ -52,6 +54,42 @@ def _web_query(name: str, default=None):
         return _web_request.args.get(name, default)
 
 
+async def _web_body_json(default=None):
+    """读取 POST JSON body（兼容 v4.24.x quart 与 v4.27 astrbot.api.web）。
+
+    无论哪个版本，通过 context.register_web_api() 注册的 handler 都运行在
+    Quart 兼容请求上下文，因此优先使用 quart 的 request.get_json()。
+    """
+    import inspect
+
+    payload = None
+    try:
+        from quart import request as _q_request
+
+        fn = getattr(_q_request, "get_json", None)
+        if callable(fn):
+            if inspect.iscoroutinefunction(fn):
+                payload = await fn(silent=True)
+            else:
+                payload = fn(silent=True)
+    except Exception:
+        pass
+    if not isinstance(payload, dict):
+        try:
+            from astrbot.api.web import request as _a_request
+
+            fn = getattr(_a_request, "json", None)
+            if callable(fn):
+                res = await fn() if inspect.iscoroutinefunction(fn) else fn()
+                if isinstance(res, dict):
+                    payload = res
+        except Exception:
+            pass
+    if not isinstance(payload, dict):
+        return default if default is not None else {}
+    return payload
+
+
 def _web_ok(data):
     """标准成功 envelope：bridge 会 resolve 为 data"""
     return {"status": "ok", "data": data}
@@ -66,7 +104,7 @@ def _web_err(message: str, status_code: int = 400):
     "企业微信邮箱智能整理",
     "chen4",
     "定时拉取企业微信邮箱，LLM 逐封分析，汇总报告推送 QQ，支持命令查询",
-    "1.0.0",
+    "1.1.0",
 )
 class EmailSummaryPlugin(star.Star):
     def __init__(
@@ -128,6 +166,12 @@ class EmailSummaryPlugin(star.Star):
             self._web_api_scan,
             ["POST"],
             "触发一次邮件扫描",
+        )
+        self.context.register_web_api(
+            f"{prefix}/resummarize",
+            self._web_api_resummarize,
+            ["POST"],
+            "重新总结邮件分析（body.force=true 强制全部重新分析）",
         )
 
     async def _web_api_list(self):
@@ -195,6 +239,35 @@ class EmailSummaryPlugin(star.Star):
             return _web_err(f"尚未配置: {', '.join(missing)}。请先在插件配置中填写。")
         asyncio.create_task(self._run_scan(push=False))
         return _web_ok({"message": "扫描已开始，请稍后刷新查看结果。"})
+
+    async def _web_api_resummarize(self):
+        """POST {force: bool} → 重新总结（后台执行，不等待）。
+
+        force=false（默认）：只重新分析「未分析过」或「上次分析失败」的邮件；
+        force=true：范围内所有邮件无论是否已分析都重新分析并覆盖旧结果。
+        重新分析完成后会自动重新生成汇总报告，可在网页上点击「生成汇总」查看。
+        """
+        missing = [
+            name
+            for name, key in (
+                ("email_address", "email_address"),
+                ("email_auth_code", "email_auth_code"),
+                ("llm_api_key", "llm_api_key"),
+            )
+            if not self.config.get(key)
+        ]
+        if missing:
+            return _web_err(f"尚未配置: {', '.join(missing)}。请先在插件配置中填写。")
+        try:
+            body = await _web_body_json({})
+        except Exception:
+            body = {}
+        force = bool(body.get("force", False))
+        mode = "全部邮件（强制覆盖）" if force else "仅未总结/上次失败的邮件"
+        asyncio.create_task(self._run_resummarize(force=force))
+        return _web_ok(
+            {"message": f"重新总结已开始（{mode}），完成后请点击「📊 生成汇总」查看最新报告。"}
+        )
 
     # ==================== 生命周期 ====================
 
@@ -360,6 +433,124 @@ class EmailSummaryPlugin(star.Star):
                     await self._push_to_target(report)
                     return report
             return None
+
+    async def _run_resummarize(self, force: bool = False) -> Optional[dict]:
+        """重新总结已扫描范围内的邮件（逐封重新调用 LLM 分析并覆盖旧结果）。
+
+        force=False（默认）：只重新分析「未分析过」或「上次分析失败（带 analysis_error）」
+        的邮件（即“没有总结的在总结一遍”）；
+        force=True：范围内所有邮件，无论是否已分析，全部强制重新分析覆盖。
+
+        重新分析完成后自动重新生成一次汇总报告（不主动推送，由调用方展示）。
+        返回统计信息与最新报告，任何异常/配置缺失返回 None。
+        """
+        if self._scan_lock.locked():
+            logger.warning("邮箱智能整理: 已有扫描/重新总结在运行，跳过本次")
+            return None
+
+        async with self._scan_lock:
+            if not self.fetcher:
+                self._init_components()
+
+            # 配置完整性检查
+            if not self.config.get("email_address") or not self.config.get(
+                "email_auth_code"
+            ):
+                logger.warning("邮箱智能整理: 邮箱配置不完整，跳过重新总结")
+                return None
+            if not self.config.get("llm_api_key"):
+                logger.warning("邮箱智能整理: LLM API Key 未配置，跳过重新总结")
+                return None
+
+            logger.info(
+                f"开始重新总结（force={force}）- "
+                f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+
+            # 1. 重新从 IMAP 拉取扫描范围内的邮件（原始正文未持久化，需重新拉取）
+            try:
+                emails = await asyncio.to_thread(
+                    self.fetcher.get_latest_emails,
+                    since_days=int(self.config.get("max_scan_days", 7)),
+                    max_count=int(self.config.get("max_emails", 50)),
+                    scan_read=True,
+                )
+            except Exception as e:
+                logger.error(f"邮箱智能整理: 重新总结时 IMAP 拉取失败 {e}")
+                return None
+
+            if not emails:
+                logger.info("邮箱智能整理: 重新总结范围内没有邮件")
+                return {
+                    "total": 0,
+                    "reanalyzed": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                    "force": force,
+                    "report": None,
+                    "message": "扫描范围内没有邮件，无需重新总结。",
+                }
+
+            # 2. 逐封判断是否需要重新分析
+            state = self.state_manager.load()
+            processed_uids = state.get("processed_uids", set())
+            new_uids = set(processed_uids)
+
+            reanalyzed = 0
+            skipped = 0
+            failed = 0
+            for email in emails:
+                existing = self.store.load(email.uid)
+                need = force or existing is None or bool(existing.get("analysis_error"))
+                if not need:
+                    skipped += 1
+                    continue
+                try:
+                    analysis = await asyncio.to_thread(
+                        self.analyzer.analyze,
+                        email.subject,
+                        email.sender,
+                        email.date,
+                        email.body_text,
+                    )
+                    if analysis.get("analysis_error"):
+                        failed += 1
+                        logger.error(
+                            f"邮件 {email.uid} 重新分析失败: {analysis['analysis_error']}"
+                        )
+                    self.store.save(email.uid, analysis)
+                    new_uids.add(email.uid)
+                    reanalyzed += 1
+                    logger.info(
+                        f"邮件 {email.uid} 重新分析完成: "
+                        f"{analysis.get('title', '')[:30]} [{analysis.get('priority', '')}]"
+                    )
+                except Exception as e:
+                    failed += 1
+                    logger.error(f"邮件 {email.uid} 重新分析失败: {e}")
+
+            # 3. 更新已处理状态（本次涉及的邮件都标记为已处理，避免重复扫描）
+            self.state_manager.save(datetime.now().isoformat(), new_uids, [])
+
+            result = {
+                "total": len(emails),
+                "reanalyzed": reanalyzed,
+                "skipped": skipped,
+                "failed": failed,
+                "force": force,
+                "report": None,
+            }
+
+            # 4. 若有重新分析，自动重新生成汇总报告
+            if reanalyzed:
+                report = await self._generate_report()
+                result["report"] = report
+
+            logger.info(
+                f"邮箱智能整理: 重新总结完成 共{len(emails)}封，"
+                f"重新分析{reanalyzed}封，跳过{skipped}封，失败{failed}封"
+            )
+            return result
 
     async def _generate_report(self) -> Optional[dict]:
         """生成汇总报告"""
@@ -602,6 +793,56 @@ class EmailSummaryPlugin(star.Star):
         else:
             yield event.plain_result("✅ 扫描完成，没有新的邮件需要处理。")
 
+    @filter.command("重新总结")
+    async def cmd_resummarize(self, event: AstrMessageEvent):
+        """重新总结邮件分析。
+
+        默认只重新分析「未分析过」或「上次分析失败」的邮件；
+        带参数「全部」（或 force/all）时，扫描范围内所有邮件无论是否已分析
+        都强制重新分析并覆盖旧结果。完成后自动重新生成汇总报告。
+        """
+        missing = [
+            name
+            for name, key in (
+                ("email_address", "email_address"),
+                ("email_auth_code", "email_auth_code"),
+                ("llm_api_key", "llm_api_key"),
+            )
+            if not self.config.get(key)
+        ]
+        if missing:
+            yield event.plain_result(
+                f"⚠️ 尚未配置: {', '.join(missing)}。请先在插件配置中填写。"
+            )
+            return
+
+        args = event.message_str.strip().split()
+        force = any(k in args for k in ("全部", "force", "all"))
+        mode = "全部邮件（强制覆盖）" if force else "仅未总结/上次失败的邮件"
+        yield event.plain_result(f"⏳ 正在重新总结（{mode}），请稍候...")
+
+        result = await self._run_resummarize(force=force)
+        if not result:
+            yield event.plain_result(
+                "⚠️ 重新总结未执行（配置不完整或已有扫描/重新总结在运行），请稍后重试。"
+            )
+            return
+
+        lines = [
+            "🔄 重新总结完成",
+            f"  范围: {'全部邮件（强制覆盖）' if result.get('force') else '仅未总结/上次失败的邮件'}",
+            f"  扫描邮件: {result.get('total', 0)} 封",
+            f"  重新分析: {result.get('reanalyzed', 0)} 封",
+            f"  跳过: {result.get('skipped', 0)} 封",
+            f"  失败: {result.get('failed', 0)} 封",
+            "",
+        ]
+        if result.get("report"):
+            lines.append(self._format_report(result["report"]))
+        else:
+            lines.append(result.get("message") or "本次没有需要重新总结的邮件。")
+        yield event.plain_result("\n".join(lines))
+
     @filter.command("帮助")
     async def cmd_help(self, event: AstrMessageEvent):
         """显示帮助"""
@@ -612,5 +853,7 @@ class EmailSummaryPlugin(star.Star):
             "  /邮件列表 - 查看已分析邮件列表\n"
             "  /邮件 <编号> - 查看指定邮件详情\n"
             "  /扫描 - 立即触发一次邮箱扫描\n"
+            "  /重新总结 - 重新分析未总结/上次失败的邮件\n"
+            "  /重新总结 全部 - 强制重新分析所有邮件并覆盖旧结果\n"
             "  /帮助 - 显示本帮助"
         )

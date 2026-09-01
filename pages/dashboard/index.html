@@ -18,6 +18,13 @@
       <div class="actions">
         <button id="btn-scan" class="btn btn-primary" title="立即拉取并分析新邮件">🔍 触发扫描</button>
         <button id="btn-report" class="btn" title="基于已分析邮件生成汇总报告">📊 生成汇总</button>
+        <div class="action-group">
+          <select id="resummarize-mode" class="mode-select" title="重新总结范围">
+            <option value="missing">仅未总结/失败</option>
+            <option value="all">全部邮件</option>
+          </select>
+          <button id="btn-resummarize" class="btn btn-warn" title="把未总结或上次失败的邮件重新 LLM 分析一遍；选择「全部邮件」则强制覆盖">♻️ 重新总结</button>
+        </div>
         <button id="btn-refresh" class="btn" title="刷新列表">🔄 刷新</button>
       </div>
     </header>

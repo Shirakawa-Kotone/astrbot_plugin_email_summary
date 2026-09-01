@@ -231,6 +231,26 @@ async function triggerScan() {
   }
 }
 
+async function triggerResummarize() {
+  const btn = $("btn-resummarize");
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = "重新总结中…";
+  try {
+    // 下拉选择：missing=仅未总结/上次失败的；all=全部邮件强制覆盖
+    const force = $("resummarize-mode").value === "all";
+    const r = await bridge.apiPost("resummarize", { force });
+    alert(r.message || "重新总结已开始");
+    // 后台执行，稍后自动刷新列表
+    setTimeout(loadList, 3000);
+  } catch (e) {
+    alert(`触发重新总结失败: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
 document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => {
     hide(btn.dataset.close);
@@ -241,6 +261,7 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
 $("btn-refresh").addEventListener("click", loadList);
 $("btn-report").addEventListener("click", generateReport);
 $("btn-scan").addEventListener("click", triggerScan);
+$("btn-resummarize").addEventListener("click", triggerResummarize);
 
 async function init() {
   await bridge.ready();
