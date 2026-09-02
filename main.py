@@ -1251,7 +1251,9 @@ class EmailSummaryPlugin(star.Star):
                 lines.append(f"     来自: {item.get('sender', '')}")
                 if item.get("body_summary"):
                     lines.append(f"     摘要: {item.get('body_summary', '')}")
-                if item.get("action_needed"):
+                if item.get("analysis_error"):
+                    lines.append(f"     ⚠️ {item['analysis_error']}")
+                elif item.get("action_needed"):
                     lines.append(f"     行动: {item.get('action_needed', '')}")
                 lines.append("")
 
