@@ -85,14 +85,25 @@ def _is_deadline_past(deadline_str: str) -> bool:
     return dt.date() < datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).date()
 
 
+def _is_402_error(analysis: dict) -> bool:
+    """判断分析结果是否因 LLM 账户余额不足（402）导致失败。
+
+    余额不足是用户账户层面的问题，修复后下一次扫描即可恢复，
+    与真正的网络不可达不同，不应当作"无需处理的邮件"过滤掉。
+    """
+    err = str(analysis.get("analysis_error", "")).strip().lower()
+    return bool(err and ("余额不足" in err or "balance" in err or "insufficient" in err))
+
+
 def _is_actionable(analysis: dict) -> bool:
     """判断一封邮件是否有「值得在总结中展示」的未竟事项。
 
     规则：
-    1. 用户标签 "已完成" → 已否定的，排除
-    2. 有 action_deadline 且已过截止日 → 已否定的，排除（不再提）
-    3. 有 action_needed 但无截止日期 → 保留（不确定是否已过）
-    4. 无行动项且无截止日 → 保留（LLM 可能判断为重要邮件）
+    1. 402 余额不足 → 视为有效（用户充值后可用，不应被跳过）
+    2. 用户标签 "已完成" → 已否定的，排除
+    3. 有 action_deadline 且已过截止日 → 已否定的，排除（不再提）
+    4. 有 action_needed 但无截止日期 → 保留（不确定是否已过）
+    5. 无行动项且无截止日 → 保留（LLM 可能判断为重要邮件）
     """
     uid_str = str(analysis.get("uid", ""))
     user_tags = []
@@ -103,6 +114,10 @@ def _is_actionable(analysis: dict) -> bool:
         user_tags = ts.get_tags(int(uid_str)) if uid_str.isdigit() else []
     except Exception:
         pass
+
+    # 402 余额不足 → 视为有效（用户充值后可恢复扫描，不应跳过）
+    if _is_402_error(analysis):
+        return True
 
     # "已完成"标签 → 已处理，排除
     if "已完成" in user_tags:
@@ -397,6 +412,8 @@ class SummaryReporter:
             if not report:
                 logger.warning("LLM 汇总报告返回内容无法解析，已使用本地兜底报告")
                 return self._fallback_report(actionable_analyses)
+            # LLM 可能忽略没有行动项的 402 邮件，手动补入
+            self._inject_402_errors(report, actionable_analyses)
             return report
 
         except Exception as e:
@@ -454,9 +471,13 @@ class SummaryReporter:
         important = [a for a in all_analyses if a.get("is_important")]
         action = [a for a in all_analyses if a.get("action_needed")]
 
+        # 402 余额不足邮件：无论有没有 action_needed 都纳入展示
+        error_402 = [a for a in all_analyses if _is_402_error(a)]
+        action_normal = [a for a in action if not _is_402_error(a)]
+
         # 过滤已过期截止日期的邮件
         actionable_action = [
-            a for a in action
+            a for a in action_normal
             if not a.get("action_deadline") or not _is_deadline_past(a.get("action_deadline", ""))
         ]
         important = [
@@ -506,11 +527,43 @@ class SummaryReporter:
                 if a.get("action_needed")
             ],
         }
+        # 补充 402 余额不足邮件到报告（LLM 不可用时仍需展示邮件信息）
+        existing_uids = {a.get("uid") for a in report["important_emails"]}
+        for a in error_402:
+            if a.get("uid") not in existing_uids:
+                report["important_emails"].append(
+                    {
+                        "title": a.get("title", ""),
+                        "sender": a.get("sender", ""),
+                        "priority": a.get("priority", "low"),
+                        "body_summary": a.get("body_summary", ""),
+                        "action_needed": a.get("action_needed", ""),
+                        "analysis_error": a.get("analysis_error", ""),
+                    }
+                )
+                existing_uids.add(a.get("uid"))
         if cat_desc:
             report["trends"] = [f"分类分布: {cat_desc}"]
         if deadline_alerts:
             report["deadline_alerts"] = deadline_alerts
         return report
+
+    def _inject_402_errors(self, report: dict, analyses: list[dict]) -> None:
+        """把 LLM 报告遗漏的 402 余额不足邮件补入 important_emails。"""
+        existing_uids = {e.get("uid") for e in report.get("important_emails", [])}
+        for a in analyses:
+            if _is_402_error(a) and a.get("uid") not in existing_uids:
+                report.setdefault("important_emails", []).append(
+                    {
+                        "title": a.get("title", ""),
+                        "sender": a.get("sender", ""),
+                        "priority": a.get("priority", "low"),
+                        "body_summary": a.get("body_summary", ""),
+                        "action_needed": a.get("action_needed", ""),
+                        "analysis_error": a.get("analysis_error", ""),
+                    }
+                )
+                existing_uids.add(a.get("uid"))
 
     def _load_all_analyses(self) -> list[dict]:
         from .email_analyzer import AnalysisStore
