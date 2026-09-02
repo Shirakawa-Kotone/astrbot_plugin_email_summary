@@ -440,6 +440,12 @@ class EmailSummaryPlugin(star.Star):
             llm_max_tokens = int(self.config.get("llm_max_tokens", 16384))
         except (TypeError, ValueError):
             llm_max_tokens = 16384
+        try:
+            self.analysis_concurrency = max(
+                1, int(self.config.get("analysis_concurrency", 5))
+            )
+        except (TypeError, ValueError):
+            self.analysis_concurrency = 5
 
         self.analyzer = EmailAnalyzer(
             api_key=api_key,
@@ -777,22 +783,18 @@ class EmailSummaryPlugin(star.Star):
             if tracker:
                 tracker.set_total(len(new_emails))
                 tracker.set_phase(
-                    "分析", f"开始逐封分析 {len(new_emails)} 封邮件（串行调用 LLM）"
+                    "分析", f"开始分析 {len(new_emails)} 封邮件（并发数: {self.analysis_concurrency}）"
                 )
-            logger.info(f"发现 {len(new_emails)} 封新邮件，逐封 LLM 分析...")
+            logger.info(f"发现 {len(new_emails)} 封新邮件，LLM 并发分析（concurrency={self.analysis_concurrency}）...")
 
-            # 3. 逐封分析（串行避免限流）
+            # 3. 并发分析（Semaphore 限流）
             new_uids = set(processed_uids)
             failed_count = 0
-            # 熔断：连续 N 封网络类失败（超时/连不上）就中止整批，避免 LLM 端点
-            # 不可达时逐封干等 2 分钟 × 几十封。0 = 不熔断。
-            abort_threshold = int(self.config.get("abort_after_consecutive_failures", 3))
-            consecutive_network_failures = 0
             network_aborted = False
-            aborted_remaining = 0
+            sem = asyncio.Semaphore(self.analysis_concurrency)
 
-            for i, email in enumerate(new_emails, 1):
-                try:
+            async def _analyze_one(email):
+                async with sem:
                     analysis = await asyncio.to_thread(
                         self.analyzer.analyze,
                         email.subject,
@@ -802,59 +804,48 @@ class EmailSummaryPlugin(star.Star):
                     )
                     self._merge_attachment_info(analysis, email)
                     error_msg = analysis.get("analysis_error", "")
-                    if error_msg:
-                        failed_count += 1
-                        logger.error(
-                            f"邮件 {email.uid} LLM 分析失败: {error_msg}"
-                        )
-                        if is_network_error(error_msg):
-                            consecutive_network_failures += 1
-                        else:
-                            consecutive_network_failures = 0
-                    else:
-                        consecutive_network_failures = 0
+                    if not error_msg:
+                        await self._notify_high_priority(analysis, email)
                     self.store.save(email.uid, analysis)
-                    await self._notify_high_priority(analysis, email)
                     new_uids.add(email.uid)
-                    if tracker:
-                        tracker.mark_done(failed=1 if error_msg else 0)
-                        # 每处理 3 封（或最后一封）发送一次进度
-                        if i % 3 == 0 or i == len(new_emails):
-                            await tracker.send_progress()
                     logger.info(
                         f"邮件 {email.uid} 分析完成: "
                         f"{analysis.get('title', '')[:30]} "
                         f"[{analysis.get('priority', '')}]"
                     )
-                except Exception as e:
+                    return analysis
+
+            analyses_results = await asyncio.gather(
+                *[_analyze_one(email) for email in new_emails],
+                return_exceptions=True,
+            )
+
+            # 统计结果（按完成顺序处理）
+            for i, result in enumerate(analyses_results):
+                if isinstance(result, Exception):
                     failed_count += 1
-                    logger.error(f"邮件 {email.uid} 分析失败: {e}")
-                    if is_network_error(str(e)):
-                        consecutive_network_failures += 1
-                    else:
-                        consecutive_network_failures = 0
+                    logger.error(f"邮件 {new_emails[i].uid} 分析异常: {result}")
                     if tracker:
                         tracker.mark_failed()
-                        await tracker.send_progress()
-
-                if (
-                    abort_threshold > 0
-                    and consecutive_network_failures >= abort_threshold
-                ):
-                    remaining = len(new_emails) - i
-                    network_aborted = True
-                    aborted_remaining = remaining
-                    logger.warning(
-                        f"邮箱智能整理: 连续 {consecutive_network_failures} 封邮件网络失败"
-                        f"（LLM 端点可能不可达），中止剩余 {remaining} 封分析"
-                    )
+                else:
+                    error_msg = result.get("analysis_error", "")
+                    if error_msg:
+                        failed_count += 1
+                        if is_network_error(error_msg) and not network_aborted:
+                            network_aborted = True
+                            aborted_remaining = len(new_emails) - i - 1
+                            logger.warning(
+                                f"邮箱智能整理: 网络错误触发熔断，中止剩余 {aborted_remaining} 封分析"
+                            )
+                            if tracker:
+                                await tracker._send(
+                                    f"⏹️ 网络错误触发熔断，已中止剩余 {aborted_remaining} 封。\n"
+                                    "请检查 llm_api_key / llm_api_base / llm_model 配置与网络连通性。"
+                                )
+                            break  # 熔断：跳过后面的
                     if tracker:
-                        await tracker._send(
-                            f"⏹️ 连续 {consecutive_network_failures} 封邮件因网络/超时失败，"
-                            f"已中止剩余 {remaining} 封。\n"
-                            "请检查 llm_api_key / llm_api_base / llm_model 配置与网络连通性。"
-                        )
-                    break
+                        tracker.mark_done(failed=1 if error_msg else 0)
+                        await tracker.send_progress()
 
             # 4. 更新状态
             self.state_manager.save(datetime.now().isoformat(), new_uids, [])
@@ -887,7 +878,7 @@ class EmailSummaryPlugin(star.Star):
             if tracker:
                 if network_aborted:
                     await tracker.finish(
-                        f"⏹️ 已中止（连续网络失败，剩余 {aborted_remaining} 封未处理）"
+                        f"⏹️ 已中止（网络错误熔断，剩余 {aborted_remaining} 封未处理）"
                     )
                 else:
                     await tracker.finish()
@@ -995,23 +986,25 @@ class EmailSummaryPlugin(star.Star):
                     f"扫描范围内 {len(emails)} 封，其中 {need_to_analyze} 封需要重新分析",
                 )
 
-            # 熔断：连续 N 封网络类失败（超时/连不上）就中止整批，避免 LLM 端点
-            # 不可达时逐封干等 2 分钟 × 几十封。0 = 不熔断。
-            abort_threshold = int(self.config.get("abort_after_consecutive_failures", 3))
-            consecutive_network_failures = 0
-            network_aborted = False
-            aborted_remaining = 0
-
+            # 3. 筛选需要重新分析的邮件，并发处理
+            emails_to_analyze = []
+            skipped = 0
             for email in emails:
                 existing = self.store.load(email.uid)
                 need = force or existing is None or bool(existing.get("analysis_error"))
-                if not need:
+                if need:
+                    emails_to_analyze.append(email)
+                else:
                     skipped += 1
-                    if tracker:
-                        tracker.mark_done(skipped=1)
-                        await tracker.send_progress()
-                    continue
-                try:
+
+            network_aborted = False
+            reanalyzed = 0
+            failed = 0
+            remaining_after_abort = 0
+            sem = asyncio.Semaphore(self.analysis_concurrency)
+
+            async def _reanalyze_one(email):
+                async with sem:
                     analysis = await asyncio.to_thread(
                         self.analyzer.analyze,
                         email.subject,
@@ -1021,57 +1014,48 @@ class EmailSummaryPlugin(star.Star):
                     )
                     self._merge_attachment_info(analysis, email)
                     error_msg = analysis.get("analysis_error", "")
-                    if error_msg:
-                        failed += 1
-                        logger.error(
-                            f"邮件 {email.uid} 重新分析失败: {error_msg}"
-                        )
-                        if is_network_error(error_msg):
-                            consecutive_network_failures += 1
-                        else:
-                            consecutive_network_failures = 0
-                    else:
-                        consecutive_network_failures = 0
+                    if not error_msg:
+                        await self._notify_high_priority(analysis, email)
                     self.store.save(email.uid, analysis)
-                    await self._notify_high_priority(analysis, email)
                     new_uids.add(email.uid)
-                    reanalyzed += 1
-                    if tracker:
-                        tracker.mark_done(reanalyzed=1)
-                        await tracker.send_progress()
                     logger.info(
                         f"邮件 {email.uid} 重新分析完成: "
                         f"{analysis.get('title', '')[:30]} [{analysis.get('priority', '')}]"
                     )
-                except Exception as e:
+                    return (analysis, error_msg)
+
+            analyses_results = await asyncio.gather(
+                *[_reanalyze_one(email) for email in emails_to_analyze],
+                return_exceptions=True,
+            )
+
+            for result in analyses_results:
+                if isinstance(result, Exception):
                     failed += 1
-                    logger.error(f"邮件 {email.uid} 重新分析失败: {e}")
-                    if is_network_error(str(e)):
-                        consecutive_network_failures += 1
-                    else:
-                        consecutive_network_failures = 0
+                    logger.error(f"邮件重新分析异常: {result}")
                     if tracker:
                         tracker.mark_failed()
-                        await tracker.send_progress()
-
-                if (
-                    abort_threshold > 0
-                    and consecutive_network_failures >= abort_threshold
-                ):
-                    remaining = len(emails) - reanalyzed - skipped
-                    network_aborted = True
-                    aborted_remaining = remaining
-                    logger.warning(
-                        f"邮箱智能整理: 连续 {consecutive_network_failures} 封邮件网络失败"
-                        f"（LLM 端点可能不可达），中止剩余 {remaining} 封重新分析"
-                    )
+                else:
+                    analysis, error_msg = result
+                    if error_msg:
+                        failed += 1
+                        if is_network_error(error_msg) and not network_aborted:
+                            network_aborted = True
+                            remaining_after_abort = len(emails_to_analyze) - reanalyzed - failed
+                            logger.warning(
+                                f"邮箱智能整理: 网络错误触发熔断，中止剩余 {remaining_after_abort} 封重新分析"
+                            )
+                            if tracker:
+                                await tracker._send(
+                                    f"⏹️ 网络错误触发熔断，已中止剩余 {remaining_after_abort} 封。\n"
+                                    "请检查 llm_api_key / llm_api_base / llm_model 配置与网络连通性。"
+                                )
+                            break
+                    else:
+                        reanalyzed += 1
                     if tracker:
-                        await tracker._send(
-                            f"⏹️ 连续 {consecutive_network_failures} 封邮件因网络/超时失败，"
-                            f"已中止剩余 {remaining} 封。\n"
-                            "请检查 llm_api_key / llm_api_base / llm_model 配置与网络连通性。"
-                        )
-                    break
+                        tracker.mark_done(reanalyzed=1 if not error_msg else 0)
+                        await tracker.send_progress()
 
             # 3. 更新已处理状态（本次涉及的邮件都标记为已处理，避免重复扫描）
             self.state_manager.save(datetime.now().isoformat(), new_uids, [])
@@ -1099,7 +1083,7 @@ class EmailSummaryPlugin(star.Star):
             if tracker:
                 if network_aborted:
                     await tracker.finish(
-                        f"⏹️ 已中止（连续网络失败，剩余 {aborted_remaining} 封未处理）"
+                        f"⏹️ 已中止（网络错误熔断，剩余 {remaining_after_abort} 封未处理）"
                     )
                 else:
                     await tracker.finish(
