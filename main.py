@@ -436,12 +436,17 @@ class EmailSummaryPlugin(star.Star):
             llm_timeout = int(self.config.get("llm_timeout", 60))
         except (TypeError, ValueError):
             llm_timeout = 60
+        try:
+            llm_max_tokens = int(self.config.get("llm_max_tokens", 16384))
+        except (TypeError, ValueError):
+            llm_max_tokens = 16384
 
         self.analyzer = EmailAnalyzer(
             api_key=api_key,
             api_base=api_base,
             model=model,
             timeout=llm_timeout,
+            max_tokens=llm_max_tokens,
         )
         self.reporter = SummaryReporter(
             api_key=api_key,
@@ -449,6 +454,7 @@ class EmailSummaryPlugin(star.Star):
             model=model,
             mode=self.config.get("summary_mode", "balanced"),
             timeout=llm_timeout,
+            max_tokens=llm_max_tokens,
         )
 
     def _register_scheduler(self):

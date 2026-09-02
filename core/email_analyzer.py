@@ -197,65 +197,49 @@ class EmailAnalyzer:
     )
 
     SYSTEM_PROMPT = (
-        "你是一个企业邮件分析助手。对每封邮件进行独立分析，"
-        "你的回复必须且只能是合法的 JSON 对象，"
-        "不要包含任何解释文字、Markdown 代码块标记或其他额外内容。"
-        "\n\n"
-        "你必须使用以下精确格式输出（字段名称和类型完全一致）：\n"
-        '{\n'
-        '  "is_important": boolean,\n'
-        '  "priority": "high" 或 "medium" 或 "low",\n'
-        '  "category": "工作" 或 "会议" 或 "审批" 或 "通知" 或 "其他",\n'
-        '  "sub_category": "string — 子分类名称",\n'
-        '  "title": "string — 邮件标题原文",\n'
-        '  "sender": "string — 发件人名称或邮箱",\n'
-        '  "date": "string — 日期",\n'
-        '  "body_summary": "string — 内容摘要，不超过30个字",\n'
-        '  "key_points": ["string — 关键要点列表，每项不超过20字"],\n'
-        '  "action_needed": "string — 需要采取的行动，如无则为空字符串",\n'
-        '  "action_deadline": "string — 截止日期，如无则为空字符串",\n'
+        "你是一个企业邮件分析助手。你必须只输出一个合法的 JSON 对象，"
+        "不要输出任何其他文字、解释、问候语或代码块标记。"
+        "你的回复必须以 { 开头，以 } 结尾。\n\n"
+        "字段定义：\n"
+        '{  "is_important": boolean,\n'
+        '  "priority": "high" | "medium" | "low",\n'
+        '  "category": "工作" | "会议" | "审批" | "通知" | "汇报" | "招聘" | "其他",\n'
+        '  "sub_category": string,\n'
+        '  "title": string,\n'
+        '  "sender": string,\n'
+        '  "date": string,\n'
+        '  "body_summary": string (≤30字),\n'
+        '  "key_points": string[] (≤5项),\n'
+        '  "action_needed": string,\n'
+        '  "action_deadline": string,\n'
         '  "has_attachment": boolean,\n'
         '  "has_links": boolean,\n'
-        '  "links": ["string — 链接列表，如无则为空数组"],\n'
-        '  "amounts": ["string — 涉及的金额，如无则为空数组"],\n'
-        '  "sentiment": "正面" 或 "负面" 或 "中性",\n'
-        '  "tags": ["string — 标签列表"]\n'
-        "}\n"
+        '  "links": string[],\n'
+        '  "amounts": string[],\n'
+        '  "sentiment": "正面" | "负面" | "中性",\n'
+        '  "tags": string[]\n'
+        "}\n\n"
+        "规则：\n"
+        "- 布尔值用 true/false（小写），不用中文\n"
+        "- 没有的值：字符串用 \"\"，数组用 []\n"
+        "- 必须包含所有字段，不能省略\n"
+        "- 不能有任何解释文字，不能有 ``` 标记\n"
+        "- 输出必须是可以被 JSON 解析器直接解析的格式\n"
         "\n"
-        "示例输出（仅作格式参考，不要照抄内容）：\n"
-        '{\n'
-        '  "is_important": true,\n'
-        '  "priority": "high",\n'
-        '  "category": "会议",\n'
-        '  "sub_category": "团队周会",\n'
-        '  "title": "本周项目进度汇报",\n'
-        '  "sender": "张三",\n'
-        '  "date": "2024-01-15",\n'
-        '  "body_summary": "张三面邀1/20讨论Q1项目计划",\n'
-        '  "key_points": ["1/20下午3点开会", "地点：会议室A", "需要准备Q1数据"],\n'
-        '  "action_needed": "回复确认参会",\n'
-        '  "action_deadline": "2024-01-19",\n'
-        '  "has_attachment": false,\n'
-        '  "has_links": true,\n'
-        '  "links": ["https://meeting.example.com/abc123"],\n'
-        '  "amounts": [],\n'
-        '  "sentiment": "中性",\n'
-        '  "tags": ["会议", "内部"]\n'
-        "}"
-        "\n\n"
-        "重要提醒：\n"
-        "- 必须输出合法 JSON，不要加 markdown 代码块（```）\n"
-        "- 不要输出任何解释文字\n"
-        "- 布尔值用 true/false（小写），不要用中文\n"
-        "- 空字符串用 \"\"，空数组用 []\n"
-        "- 所有字段都必须存在，不要省略任何字段\n"
+        "示例：\n"
+        '{"is_important":true,"priority":"high","category":"会议","sub_category":"","title":"项目进度汇报",'
+        '"sender":"张三","date":"2024-01-15","body_summary":"讨论Q1计划",'
+        '"key_points":["1/20下午3点","会议室A"],"action_needed":"回复确认",'
+        '"action_deadline":"2024-01-19","has_attachment":false,"has_links":true,'
+        '"links":["https://meeting.example.com/abc123"],"amounts":[],"sentiment":"中性","tags":[]}'
     )
 
-    def __init__(self, api_key: str, api_base: str, model: str, timeout: int = 60):
+    def __init__(self, api_key: str, api_base: str, model: str, timeout: int = 60, max_tokens: int = 16384):
         self.api_key = api_key or ""
         self.api_base = api_base
         self.model = model
         self.timeout = timeout
+        self.max_tokens = max_tokens
         self._client: Optional[OpenAI] = None
 
     def _get_client(self) -> OpenAI:
@@ -300,7 +284,7 @@ class EmailAnalyzer:
                     },
                 ],
                 temperature=0.2,
-                max_tokens=2048,
+                max_tokens=self.max_tokens,
             )
             return self._parse_response(
                 response.choices[0].message.content,

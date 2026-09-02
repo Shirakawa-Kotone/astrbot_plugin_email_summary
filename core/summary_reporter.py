@@ -334,12 +334,14 @@ class SummaryReporter:
         model: str,
         mode: str = "balanced",
         timeout: int = 60,
+        max_tokens: int = 16384,
     ):
         self.api_key = api_key or ""
         self.api_base = api_base
         self.model = model
         self.mode = mode
         self.timeout = timeout
+        self.max_tokens = max_tokens
         self._client: Optional[OpenAI] = None
 
     def _get_client(self) -> OpenAI:
@@ -406,7 +408,7 @@ class SummaryReporter:
                     {"role": "user", "content": f"请根据以下邮件分析结果生成汇报：\n{email_text}"},
                 ],
                 temperature=0.2,
-                max_tokens=8192,
+                max_tokens=self.max_tokens,
             )
             report = self._parse_report(response.choices[0].message.content)
             if not report:
