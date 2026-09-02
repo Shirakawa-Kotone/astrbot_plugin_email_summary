@@ -32,6 +32,28 @@
     <main>
       <section id="status-bar" class="status-bar"></section>
 
+      <section id="progress-view" class="panel hidden">
+        <div class="panel-head">
+          <h2><span id="progress-spinner" class="spinner hidden"></span><span id="progress-title">任务进度</span></h2>
+          <button class="btn btn-ghost" data-close="progress-view">隐藏</button>
+        </div>
+        <div class="progress-body">
+          <div class="progress-bar-wrap">
+            <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+          </div>
+          <div class="progress-meta">
+            <span id="progress-label">准备中…</span>
+            <span id="progress-count">0 / 0</span>
+          </div>
+          <div class="progress-detail">
+            <span id="progress-phase">阶段: --</span>
+            <span id="progress-eta">ETA: --</span>
+            <span id="progress-elapsed">耗时: --</span>
+          </div>
+          <div id="progress-message" class="progress-message"></div>
+        </div>
+      </section>
+
       <section id="report-view" class="panel hidden">
         <div class="panel-head">
           <h2>汇总报告</h2>

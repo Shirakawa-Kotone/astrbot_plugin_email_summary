@@ -36,6 +36,16 @@
     "type": "string",
     "default": "gpt-4o-mini"
   },
+  "llm_timeout": {
+    "description": "单个 LLM 请求超时时间（秒）。网络慢或模型响应慢时可调大；端点不可达时建议保持默认并配合下方熔断",
+    "type": "int",
+    "default": 60
+  },
+  "abort_after_consecutive_failures": {
+    "description": "连续 N 封邮件因网络/超时失败时中止本次任务（0=不中止）。避免 LLM 端点不可达时逐封干等数十分钟",
+    "type": "int",
+    "default": 3
+  },
   "summary_mode": {
     "description": "brief=精简, balanced=均衡, detailed=详细, ultra_detailed=超详细",
     "type": "string",
@@ -82,5 +92,10 @@
     "description": "汇总报告推送到哪个 QQ 号（留空则使用命令请求者）",
     "type": "string",
     "default": ""
+  },
+  "tag_notifications_enabled": {
+    "description": "扫描到 High/Medium 优先级邮件时立即向 QQ 发送提醒（需同时配置 target_qq）",
+    "type": "bool",
+    "default": true
   }
 }
